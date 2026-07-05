@@ -47,7 +47,9 @@ COMPARE_PATTERNS = [
 
 FOLLOWUP_PATTERNS = [
     r"اون\s*اول", r"اولی", r"دومی", r"سومی", r"همون", r"اون\s*دوم",
+    r"گزینه\s*\d", r"گزینه\s*[۱-۵]", r"این\s*مدل",
     r"قیمتش", r"رمش", r"حافظه", r"گارانتی", r"موجودی", r"رنگش",
+    r"باتری", r"پردازنده", r"هارد", r"برندش", r"شارژدهی",
     r"ویژگی", r"امتیاز", r"توضیح",
 ]
 
@@ -145,15 +147,37 @@ ORDINAL_MAP = {
     "پنجم": 4, "۵": 4,
 }
 
+# Specific attributes first — generic patterns like چنده/چقدر (price) must be
+# checked last so «رمش چقدره؟» resolves to ram, not price.
 FIELD_PATTERNS: dict[str, list[str]] = {
-    "price": [r"قیمت", r"چنده", r"چقدر"],
-    "features": [r"ویژگی", r"مشخصات", r"رم", r"حافظه", r"پردازنده"],
+    "ram": [r"(?<![\w\u0600-\u06FF])رم", r"\bram\b"],
+    "storage": [r"حافظه", r"هارد", r"\bssd\b"],
+    "battery": [r"باتری", r"شارژدهی"],
+    "processor": [r"پردازنده", r"\bcpu\b"],
     "rating": [r"امتیاز", r"نظر", r"رضایت"],
     "stock": [r"موجود", r"انبار", r"stock"],
     "warranty": [r"گارانتی", r"ضمانت"],
     "color": [r"رنگ"],
     "brand": [r"برند"],
+    "features": [r"ویژگی", r"مشخصات"],
     "description": [r"توضیح", r"درباره"],
+    "price": [r"قیمت", r"چنده", r"چقدر"],
+}
+
+# Spec fields answered by extracting the value from product text (features/description)
+SPEC_FIELDS: dict[str, dict[str, Any]] = {
+    "ram": {"label": "رم", "keywords": ["رم", "ram"], "direct_keys": ("ram", "memory")},
+    "storage": {
+        "label": "حافظه",
+        "keywords": ["حافظه", "هارد", "ssd", "storage"],
+        "direct_keys": ("storage",),
+    },
+    "battery": {"label": "باتری", "keywords": ["باتری", "battery"], "direct_keys": ("battery",)},
+    "processor": {
+        "label": "پردازنده",
+        "keywords": ["پردازنده", "cpu", "core"],
+        "direct_keys": ("processor", "cpu"),
+    },
 }
 
 
@@ -473,22 +497,75 @@ def get_missing_slots(requirements: dict[str, Any]) -> list[str]:
     return missing
 
 
+# Word ordinals are safe as substrings; digit ordinals need context so that
+# numbers inside budgets («بودجه شد ۳۰ میلیون») are never product references.
+_WORD_ORDINALS = {
+    "اولی": 0, "اول": 0,
+    "دومی": 1, "دوم": 1,
+    "سومی": 2, "سوم": 2,
+    "چهارمی": 3, "چهارم": 3,
+    "پنجمی": 4, "پنجم": 4,
+}
+
+# «گزینه ۲» / «گزینه 2» / «شماره ۳»
+_OPTION_REF_RE = re.compile(r"(?:گزینه|شماره|مورد)\s*([1-5])")
+
+
 def resolve_ordinal_reference(text: str, recommended: list[dict]) -> dict | None:
-    """Resolve 'دومی' etc. to a product from recommendations."""
+    """Resolve 'دومی' / 'گزینه ۲' etc. to a product from recommendations."""
     if not recommended:
         return None
-    for word, idx in ORDINAL_MAP.items():
-        if word in text and idx < len(recommended):
+
+    normalized = _normalize_persian_digits(text)
+
+    for word, idx in _WORD_ORDINALS.items():
+        if word in normalized and idx < len(recommended):
             return recommended[idx]
+
+    match = _OPTION_REF_RE.search(normalized)
+    if match:
+        idx = int(match.group(1)) - 1
+        if idx < len(recommended):
+            return recommended[idx]
+
+    # Bare digits are ambiguous (budgets, prices) — never treat them as ordinals.
+    # With a single recommendation, pronouns like «رمش» refer to it.
     return recommended[0] if len(recommended) == 1 else None
 
 
 def detect_field_question(text: str) -> str | None:
     """Detect which product field user is asking about."""
+    text_lower = text.lower()
     for field, patterns in FIELD_PATTERNS.items():
         for p in patterns:
-            if re.search(p, text):
+            if re.search(p, text_lower):
                 return field
+    return None
+
+
+def extract_spec_value(product: dict[str, Any], field: str) -> str | None:
+    """
+    Extract a spec value (e.g. «رم ۱۶ گیگ») for a SPEC_FIELDS field from
+    product data: direct keys first, then features/description segments.
+    """
+    spec = SPEC_FIELDS.get(field)
+    if not spec:
+        return None
+
+    for key in spec["direct_keys"]:
+        value = product.get(key)
+        if value:
+            return str(value).strip()
+
+    for source_key in ("features", "specs", "description"):
+        text = str(product.get(source_key) or "")
+        if not text:
+            continue
+        # Features are pipe/comma-separated segments like «رم ۱۶ گیگ | باتری ۱۰ ساعته»
+        for segment in re.split(r"[|،؛.]", text):
+            segment = segment.strip()
+            if any(kw.lower() in segment.lower() for kw in spec["keywords"]):
+                return segment
     return None
 
 

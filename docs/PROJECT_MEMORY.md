@@ -2,6 +2,43 @@
 
 ## آخرین به‌روزرسانی: 2026-07-05
 
+### Memory follow-up spec answers (2026-07-05)
+
+**Symptom:** بعد از پیشنهاد Lenovo IdeaPad 5، سؤال «رمش چقدره؟» به‌جای «رم این مدل ۱۶ گیگ است.» یک خلاصه عمومی محصول برمی‌گرداند.
+
+**Root causes:**
+1. در `FIELD_PATTERNS`، «رم/حافظه/پردازنده» به field عمومی `features` نگاشت می‌شد → کل رشته features برگردانده می‌شد نه مقدار مشخصه
+2. ترتیب الگوها: «چقدر» در `price` بود و قبل از بقیه چک می‌شد → «رمش چقدره؟» → price
+3. `resolve_ordinal_reference` رقم‌های تنها (مثل «۳» در «۳۰ میلیون») را substring-match می‌کرد → متن بودجه به محصول سوم resolve می‌شد
+4. LLM polish پاسخ دقیق حافظه را بازنویسی و حقایق را با خلاصه عمومی جایگزین می‌کرد
+
+**Fixes (`nlp.py`, `nodes.py`):**
+- Fieldهای اختصاصی `ram` / `storage` / `battery` / `processor` با `SPEC_FIELDS` (label + keywords + direct keys)؛ الگوهای عمومی price در انتهای `FIELD_PATTERNS`
+- `extract_spec_value()`: اول کلیدهای مستقیم (`ram`, `memory`, …)، بعد جستجوی segment در `features`/`specs`/`description` (جداشده با `|`،`،`)
+- پاسخ: «رم این مدل ۱۶ گیگ است.» — اگر مشخصه پیدا نشد: «این مشخصه در اطلاعات محصول ثبت نشده.»
+- `resolve_ordinal_reference` بازنویسی شد: فقط ordinal کلمه‌ای (اولی/دومی/…) و «گزینه/شماره/مورد N»؛ ارقام تنها هرگز reference نیستند؛ تک-محصول → همان محصول برای «رمش/قیمتش/این مدل»
+- polish برای پاسخ‌های `from_memory` skip می‌شود (حقایق دقیق نباید بازنویسی شوند)
+- `FOLLOWUP_PATTERNS` گسترش یافت: باتری، پردازنده، هارد، برندش، گزینه N، این مدل
+
+#### Changed files
+
+| File | Change |
+|------|--------|
+| `app/graph/nlp.py` | `SPEC_FIELDS`, `extract_spec_value`, `FIELD_PATTERNS` مرتب‌شده, `resolve_ordinal_reference` امن |
+| `app/graph/nodes.py` | مسیر spec در `answer_from_memory_node` + skip polish برای from_memory |
+| `tests/test_memory_followup.py` | ۹ تست: ram/price/battery، ordinal دومی/گزینه ۲، بودجه≠ordinal، مشخصه ناموجود |
+
+#### Tests run
+
+```bash
+python -m pytest        # 75 passed
+python -m compileall app  # OK
+```
+
+**Verified end-to-end:** پیشنهاد لپ‌تاپ ۴۰ میلیونی → «رمش چقدره؟» → «رم این مدل ۱۶ گیگ است.» → «قیمتش چنده؟» → قیمت دقیق از حافظه. بدون جستجوی مجدد (`from_memory=True`).
+
+---
+
 ### Laptop misspellings + OpenRouter LLM + polish fixes (2026-07-05)
 
 **Symptom 1 (لوپ سؤال):** «یه لبتاب میخوام» / «لب تاب» → دسته شناسایی نمی‌شد → ربات بی‌نهایت «دنبال چه نوع محصولی هستی؟» می‌پرسید.

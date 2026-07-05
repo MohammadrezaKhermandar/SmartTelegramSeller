@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -260,6 +261,26 @@ def answer_from_memory_node(state: SalesAssistantState) -> dict[str, Any]:
             "from_memory": True,
         }
 
+    # Spec questions (ram/storage/battery/processor): extract from product data
+    if field in nlp.SPEC_FIELDS:
+        segment = nlp.extract_spec_value(product, field)
+        label = nlp.SPEC_FIELDS[field]["label"]
+        if segment:
+            # «رم ۱۶ گیگ» → «رم این مدل ۱۶ گیگ است.»
+            value = re.sub(rf"^{re.escape(label)}\s*", "", segment).strip()
+            if value and value != segment:
+                response = f"{label} این مدل {value} است."
+            else:
+                response = f"{label} این مدل: {segment}"
+        else:
+            response = "این مشخصه در اطلاعات محصول ثبت نشده."
+        return {
+            "response_text": response,
+            "conversation_stage": "answering_followup",
+            "from_memory": True,
+            "messages": [AIMessage(content=response)],
+        }
+
     # Try to get field from memory first
     if field and field in product and product.get(field):
         value = product[field]
@@ -470,6 +491,10 @@ def llm_polish_node(state: SalesAssistantState) -> dict[str, Any]:
     # Clarifying questions must reach the user verbatim — LLM rewriting them
     # loses the numbered slots and stalls the requirement-gathering flow.
     if state.get("conversation_stage") == "gathering_requirements":
+        return {}
+    # Memory answers are precise attribute facts (e.g. «رم این مدل ۱۶ گیگ است.»)
+    # — rewriting them can replace the fact with a generic summary.
+    if state.get("from_memory"):
         return {}
     polished = _with_polish(state, draft)
     if polished == draft:
