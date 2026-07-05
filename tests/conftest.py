@@ -6,6 +6,8 @@ import os
 
 # Must run before app imports – force offline mode for tests
 os.environ["GROQ_API_KEY"] = ""
+os.environ["OPENROUTER_API_KEY"] = ""
+os.environ["XAI_API_KEY"] = ""
 os.environ["USE_LLM"] = "false"
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["TELEGRAM_BOT_TOKEN"] = ""

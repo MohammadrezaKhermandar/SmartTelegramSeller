@@ -7,7 +7,12 @@ from typing import Any
 
 # Persian/English category keywords mapped to CSV categories
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
-    "لپ‌تاپ": ["لپ تاپ", "لپتاپ", "لپ‌تاپ", "notebook", "laptop"],
+    "لپ‌تاپ": [
+        "لپ تاپ", "لپتاپ", "لپ‌تاپ",
+        # common misspellings
+        "لب تاب", "لبتاب", "لپ تاب", "لپتاب", "لب تاپ", "لبتاپ", "لب‌تاپ", "لپ‌تاب",
+        "notebook", "laptop",
+    ],
     "هدفون": ["هدفون", "هدفون بی‌سیم", "headphone", "earphone"],
     "اسپیکر": ["اسپیکر", "بلندگو", "speaker"],
     "تلویزیون": ["تلویزیون", "tv", "تی‌وی"],

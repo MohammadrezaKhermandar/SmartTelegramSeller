@@ -107,10 +107,11 @@ cp .env.example .env
 | `OPENAI_API_KEY` | اختیاری؛ بدون آن TF-IDF استفاده می‌شود |
 | `FOLLOWUP_1H_SECONDS` | فاصله فالوآپ (پیش‌فرض ۳۶۰۰) |
 | `DISCOUNT_2D_SECONDS` | فاصله تخفیف (پیش‌فرض ۱۷۲۸۰۰) |
-| `LLM_PROVIDER` | `xai` یا `groq` (پیش‌فرض groq) |
-| `XAI_API_KEY` | کلید xAI (Grok) برای polish پاسخ |
-| `XAI_MODEL` | مدل xAI (پیش‌فرض `grok-4.3`) |
-| `GROQ_API_KEY` | کلید Groq (جایگزین xAI) |
+| `LLM_PROVIDER` | `openrouter`، `xai` یا `groq` (پیش‌فرض openrouter) |
+| `OPENROUTER_API_KEY` | کلید OpenRouter برای polish پاسخ |
+| `OPENROUTER_MODEL` | پیش‌فرض `openai/gpt-4.1-nano`؛ مدل‌های رایگان با پسوند `:free` یا `openrouter/free` |
+| `OPENROUTER_BASE_URL` | پیش‌فرض `https://openrouter.ai/api/v1` |
+| `XAI_API_KEY` | کلید xAI (Grok) — جایگزین OpenRouter |
 | `USE_LLM` | فعال/غیرفعال LLM (پیش‌فرض true) |
 | `LLM_PROXY` | پروکسی HTTP برای LLM (پیش‌فرض همان `TELEGRAM_PROXY`) |
 | `CSV_DOWNLOAD_URL` | URL دانلود محصولات (وقتی فایل محلی نیست) |
@@ -129,8 +130,10 @@ python -m app.main
   FOLLOWUP_1H_SECONDS=60
   DISCOUNT_2D_SECONDS=120
   ```
-- **یک instance ربات:** فقط یک `python -m app.main` اجرا کنید؛ چند instance → خطای `Conflict` در تلگرام.
-- **خطای LLM (401/403/429):** کلید معتبر xAI/Groq در `.env` بگذارید (برای xAI حساب باید اعتبار/credit داشته باشد) یا `USE_LLM=false` بگذارید. خطای دائمی auth/credit فقط یک‌بار لاگ می‌شود و ربات به پاسخ آفلاین ادامه می‌دهد.
+- **یک instance ربات:** فقط یک `python -m app.main` اجرا کنید؛ چند instance → خطای `Conflict` در تلگرام و پاسخ‌های تکراری.
+- **خطای LLM (401/403/429):** کلید معتبر OpenRouter/xAI/Groq در `.env` بگذارید یا `USE_LLM=false`. مدل‌های رایگان OpenRouter با پسوند `:free` هستند (مثلاً `openrouter/free` برای انتخاب خودکار). خطای polish هرگز پاسخ ربات را از بین نمی‌برد — متن پیش‌نویس ارسال می‌شود.
+- **املاهای مختلف لپ‌تاپ:** «لب تاب»، «لبتاب»، «لپ تاب»، «لپتاب» و مشابه همگی به دسته `لپ‌تاپ` نگاشت می‌شوند.
+- **polish سؤال‌های شفاف‌کننده:** در مرحله جمع‌آوری نیازمندی‌ها LLM متن را بازنویسی نمی‌کند تا سؤال‌های شماره‌دار دقیق بمانند.
 
 ## تست
 

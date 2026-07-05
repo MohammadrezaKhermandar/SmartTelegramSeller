@@ -34,6 +34,21 @@ def test_detect_intent(message: str, expected: str) -> None:
     assert nlp.detect_intent(message) == expected
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "یه لب تاب میخوام",
+        "یه لبتاب میخوام",
+        "لپ تاب برای برنامه‌نویسی",
+        "لپتاب دارید؟",
+        "یه لپ‌تاپ می‌خوام",
+    ],
+)
+def test_laptop_misspellings_detected_as_laptop_category(text: str) -> None:
+    req = nlp.extract_requirements(text)
+    assert req["category"] == "لپ‌تاپ", f"{text!r} must map to لپ‌تاپ"
+
+
 def test_company_question_answers_manager_from_profile() -> None:
     response = answer_company_question("مدیرتون کیه؟")
     assert BUSINESS_PROFILE["manager"] in response

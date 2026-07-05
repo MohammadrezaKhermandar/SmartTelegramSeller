@@ -2,6 +2,54 @@
 
 ## آخرین به‌روزرسانی: 2026-07-05
 
+### Laptop misspellings + OpenRouter LLM + polish fixes (2026-07-05)
+
+**Symptom 1 (لوپ سؤال):** «یه لبتاب میخوام» / «لب تاب» → دسته شناسایی نمی‌شد → ربات بی‌نهایت «دنبال چه نوع محصولی هستی؟» می‌پرسید.
+
+**Symptom 2 (پاسخ‌های خنگ):** LLM polish هر بار «سلام!» اضافه می‌کرد، سؤال‌های شماره‌دار را بازنویسی مبهم می‌کرد و سؤال‌های جدید از خودش می‌ساخت.
+
+**Symptom 3 (پاسخ تکراری/کرش):** ۴ instance همزمان ربات (۲ تا حتی با پایتون سیستم خارج از venv) → خطای `Conflict` تلگرام و دو پاسخ برای یک پیام.
+
+**Fixes:**
+1. `CATEGORY_KEYWORDS` در `nlp.py`: ۸ املای رایج لپ‌تاپ اضافه شد (لب تاب، لبتاب، لپ تاب، لپتاب، لب تاپ، لبتاپ، لب‌تاپ، لپ‌تاب)
+2. `llm_polish_node` در `nodes.py`: در مرحله `gathering_requirements` polish کاملاً skip می‌شود (سؤال‌های شفاف‌کننده باید verbatim برسند)
+3. prompt polish در `client.py`: «سلام نگو»، «سؤال جدید اضافه نکن»، «ساختار لیست را حفظ کن»
+4. خطای polish دیگر raise نمی‌شود — همیشه متن پیش‌نویس برمی‌گردد (قبلاً `LLMError` مسیر خطا را فعال می‌کرد)
+
+**LLM provider — OpenRouter:**
+- `LLM_PROVIDER=openrouter` با کلاینت عمومی `OpenAICompatibleChatClient` (بدون SDK اضافه، با `requests` و پروکسی)
+- مدل فعلی: `openai/gpt-4.1-nano` (ارزان و سریع؛ رایگان نیست). جایگزین رایگان: `openrouter/free`
+- خطای دائمی 401/402/403 → LLM برای session خاموش می‌شود، بدون retry و بدون چاپ کلید
+- xAI (هر دو کلید تست‌شده بدون credit بودند) و Groq (کلید نامعتبر) به‌عنوان provider جایگزین باقی ماندند
+
+#### Changed files
+
+| File | Change |
+|------|--------|
+| `app/graph/nlp.py` | املاهای لپ‌تاپ در `CATEGORY_KEYWORDS` |
+| `app/graph/nodes.py` | skip polish در مرحله gathering |
+| `app/llm/client.py` | OpenRouter provider + قوانین polish + no-raise fallback |
+| `app/config.py` | `OPENROUTER_*` env vars |
+| `tests/conftest.py` | صفر کردن `OPENROUTER_API_KEY`/`XAI_API_KEY` در تست‌ها |
+| `tests/test_nlp_intent.py` | ۵ تست املای لبتاب |
+| `README.md` | جدول env، نکات دمو (املاها، polish، تک-instance) |
+
+#### Tests run
+
+```bash
+python -m pytest        # 66 passed
+python -m compileall app  # OK
+```
+
+**Verified in Telegram (log):** `/reset` → «یه لبتاب میخوام» → دسته لپ‌تاپ → «بودجه ۴۰ میلیون…» → recommending → «بودجه شد ۳۰ میلیون» → `change_preferences` با حفظ دسته. بدون Conflict.
+
+#### Remaining issues
+
+1. `openai/gpt-4.1-nano` paid است — اگر credit حساب OpenRouter تمام شود پاسخ آفلاین می‌ماند
+2. همیشه فقط یک instance ربات اجرا شود
+
+---
+
 ### Note-consistency fix + xAI provider (2026-07-05, بعد از restart)
 
 **Symptom:** بعد از restart، pipeline درست بود اما پیام متناقض: «محصولی پیدا نکردم…» و بلافاصله زیرش Lenovo IdeaPad 5 (۳۹,۳۲۵,۰۰۰) نمایش داده می‌شد.

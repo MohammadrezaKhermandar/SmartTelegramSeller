@@ -467,6 +467,10 @@ def llm_polish_node(state: SalesAssistantState) -> dict[str, Any]:
     draft = state.get("response_text")
     if not draft:
         return {}
+    # Clarifying questions must reach the user verbatim — LLM rewriting them
+    # loses the numbered slots and stalls the requirement-gathering flow.
+    if state.get("conversation_stage") == "gathering_requirements":
+        return {}
     polished = _with_polish(state, draft)
     if polished == draft:
         return {}

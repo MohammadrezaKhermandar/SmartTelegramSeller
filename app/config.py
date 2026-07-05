@@ -28,11 +28,15 @@ TELEGRAM_PROXY = os.getenv("TELEGRAM_PROXY", "").strip()
 # Vector store: keyword (offline) | tfidf | chroma | auto
 VECTOR_STORE_BACKEND = os.getenv("VECTOR_STORE_BACKEND", "keyword").lower()
 
-# LLM settings (Groq – فاز ۱)
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
+# LLM provider: openrouter | xai | groq
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
 USE_LLM = os.getenv("USE_LLM", "true").lower() in ("1", "true", "yes")
+
+# OpenRouter – OpenAI-compatible API (free models use :free suffix)
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4.1-nano")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "SINWAY Sales Assistant")
 
 # xAI (Grok) – OpenAI-compatible API
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
@@ -40,6 +44,10 @@ XAI_MODEL = os.getenv("XAI_MODEL", "grok-4.3")
 XAI_BASE_URL = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1")
 # Optional HTTP proxy for LLM calls (defaults to the Telegram proxy)
 LLM_PROXY = os.getenv("LLM_PROXY", os.getenv("TELEGRAM_PROXY", "")).strip()
+
+# Groq (legacy)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
