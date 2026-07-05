@@ -1,0 +1,41 @@
+%% LangGraph Sales Assistant Workflow
+flowchart TD
+    START([User Message]) --> load_memory[load_memory_node]
+    load_memory --> input_classifier[input_classifier_node]
+
+    input_classifier -->|image| image_similarity[image_similarity_node]
+    input_classifier -->|url| url_similarity[url_similarity_node]
+    input_classifier -->|text| intent_detector[intent_detector_node]
+
+    intent_detector -->|new request| requirement_extractor[requirement_extractor_node]
+    intent_detector -->|followup| answer_from_memory[answer_from_memory_node]
+    intent_detector -->|compare| compare_products[compare_products_node]
+    intent_detector -->|change prefs| update_requirements[update_requirements_node]
+    intent_detector -->|greeting/chat| final_response[final_response_node]
+    intent_detector -->|url| url_similarity
+
+    requirement_extractor --> enough_info_checker[enough_info_checker_node]
+    enough_info_checker -->|incomplete| ask_clarifying[ask_clarifying_question_node]
+    enough_info_checker -->|complete| tool_agent[tool_agent_node LLM bind_tools]
+
+    update_requirements -->|needs info| enough_info_checker
+    update_requirements -->|ready| tool_agent
+
+    tool_agent -->|success| recommend_products[recommend_products_node]
+    tool_agent -->|error| error_handler[error_handler_node]
+    tool_agent -.->|fallback| hybrid_search[hybrid_search_node]
+    hybrid_search -->|success| recommend_products
+    hybrid_search -->|error| error_handler
+    error_handler -->|retry| hybrid_search
+    error_handler -->|give up| llm_polish[llm_polish_node]
+
+    ask_clarifying --> llm_polish
+    recommend_products --> llm_polish
+    answer_from_memory --> llm_polish
+    compare_products --> llm_polish
+    image_similarity --> llm_polish
+    url_similarity --> llm_polish
+    final_response --> llm_polish
+
+    llm_polish --> save_memory[save_memory_node]
+    save_memory --> END([Response to User])
