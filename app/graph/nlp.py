@@ -48,8 +48,17 @@ FOLLOWUP_PATTERNS = [
 
 CHANGE_PATTERNS = [
     r"بودجه‌ام", r"بودجه ام", r"بودجه‌مو", r"بودجه مو",
+    r"بودجه\s*شد", r"بودجه\s*شده",
     r"ارزون‌تر", r"ارزان‌تر", r"گرون‌تر", r"گران‌تر",
     r"برند", r"عوض", r"تغییر", r"به جاش", r"نمی‌خوام", r"نمیخوام",
+]
+
+PREFERENCE_UPDATE_PATTERNS = [
+    r"بودجه\s*(ام|مو)?\s*(رو|را)?\s*(تغییر|عوض|کرد)",
+    r"بودجه\s*شد",
+    r"بودجه\s*شده",
+    r"رنگ\s*(ام|مو)?\s*(رو|را)?\s*(تغییر|عوض|کرد)",
+    r"برند\s*(ام|مو)?\s*(رو|را)?\s*(تغییر|عوض|کرد)",
 ]
 
 GREETING_EXACT = {"/start", "سلام", "درود", "hello", "hi"}
@@ -208,13 +217,65 @@ def _is_general_chat(text_lower: str) -> bool:
     return any(re.search(pattern, text_lower) for pattern in GENERAL_CHAT_PATTERNS)
 
 
+def normalize_category(category: str | None) -> str | None:
+    """Map aliases (e.g. laptop) to canonical CSV category names."""
+    if not category:
+        return None
+    value = str(category).strip()
+    for canonical, keywords in CATEGORY_KEYWORDS.items():
+        if value == canonical or value.lower() == canonical.lower():
+            return canonical
+        if value.lower() in {kw.lower() for kw in keywords}:
+            return canonical
+    return value
+
+
+def product_matches_category(product: dict[str, Any], category: str | None) -> bool:
+    """True when product belongs to the normalized category."""
+    normalized = normalize_category(category)
+    if not normalized:
+        return True
+    product_category = str(product.get("category", ""))
+    return (
+        product_category == normalized
+        or normalized in product_category
+        or product_category in normalized
+    )
+
+
+def normalize_requirements(req: dict[str, Any] | None) -> dict[str, Any]:
+    """Apply category normalization to a requirements dict."""
+    normalized = dict(req or {})
+    if normalized.get("category"):
+        normalized["category"] = normalize_category(normalized["category"])
+    return normalized
+
+
+def is_requirement_completion(
+    text: str,
+    existing_requirements: dict[str, Any] | None = None,
+) -> bool:
+    """User is filling budget/usage while category is already known."""
+    existing_requirements = existing_requirements or {}
+    if not existing_requirements.get("category"):
+        return False
+    incoming = extract_requirements(text)
+    if incoming.get("category"):
+        return False
+    return _is_partial_requirement_update(incoming)
+
+
 def detect_intent(
     text: str,
     has_image: bool = False,
     has_recommendations: bool = False,
+    existing_requirements: dict[str, Any] | None = None,
+    conversation_stage: str | None = None,
 ) -> str:
     text = _normalize_persian_digits(text)
     text_lower = _normalize_text(text)
+    existing_requirements = existing_requirements or {}
+    has_context = has_recommendations or bool(existing_requirements.get("category"))
 
     if has_image:
         return "image_input"
@@ -224,11 +285,20 @@ def detect_intent(
         return "greeting"
     if any(re.search(p, text_lower) for p in COMPARE_PATTERNS):
         return "compare"
+    if not has_recommendations and is_requirement_completion(text, existing_requirements):
+        return "new_product_request"
+    if has_recommendations and has_context and is_preference_update(
+        text,
+        existing_requirements,
+        has_recommendations=has_recommendations,
+        conversation_stage=conversation_stage,
+    ):
+        return "change_preferences"
     if has_recommendations and any(re.search(p, text_lower) for p in FOLLOWUP_PATTERNS):
         return "followup_question"
     if has_recommendations and any(re.search(p, text_lower) for p in CHANGE_PATTERNS):
         return "change_preferences"
-    if any(re.search(p, text_lower) for p in [r"تغییر", r"عوض", r"به جاش"]):
+    if any(re.search(p, text_lower) for p in [r"تغییر", r"عوض", r"به جاش"]) and has_recommendations:
         return "change_preferences"
     if any(kw in text_lower for kw in ["خریدم", "خرید کردم", "سفارش دادم"]):
         return "purchase"
@@ -253,11 +323,85 @@ def _detect_category(text: str) -> str | None:
     return None
 
 
+def _is_partial_requirement_update(new: dict[str, Any]) -> bool:
+    """True when the message only updates budget/brand/usage without a new category."""
+    if new.get("category"):
+        return False
+    return any(
+        new.get(field) is not None
+        for field in ("max_price", "min_price", "brand", "usage", "features")
+    )
+
+
+def merge_requirements(
+    existing: dict[str, Any] | None,
+    new: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """
+    Merge requirement updates into existing state.
+    Preserves category/raw_query unless the user explicitly provides a new category.
+    """
+    merged = dict(existing or {})
+    incoming = dict(new or {})
+
+    for key, value in incoming.items():
+        if key == "category":
+            if value:
+                merged["category"] = normalize_category(value)
+            continue
+        if key == "raw_query":
+            continue
+        if value is not None and value != [] and value != "":
+            merged[key] = value
+
+    if incoming.get("category"):
+        merged["raw_query"] = incoming.get("raw_query") or merged.get("raw_query")
+    elif _is_partial_requirement_update(incoming) and merged.get("raw_query"):
+        pass
+    elif incoming.get("raw_query"):
+        merged["raw_query"] = incoming["raw_query"]
+
+    return merged
+
+
+def is_preference_update(
+    text: str,
+    existing_requirements: dict[str, Any] | None = None,
+    *,
+    has_recommendations: bool = False,
+    conversation_stage: str | None = None,
+) -> bool:
+    """Detect budget/brand updates after recommendations — not requirement gathering."""
+    if conversation_stage == "gathering_requirements" and not has_recommendations:
+        return False
+
+    text_lower = _normalize_text(_normalize_persian_digits(text))
+    existing_requirements = existing_requirements or {}
+
+    if _has_usage_mention(text) and existing_requirements.get("category") and not has_recommendations:
+        return False
+
+    if any(re.search(pattern, text_lower) for pattern in PREFERENCE_UPDATE_PATTERNS):
+        return has_recommendations
+    if has_recommendations and any(re.search(pattern, text_lower) for pattern in CHANGE_PATTERNS):
+        return True
+
+    if (
+        has_recommendations
+        and existing_requirements.get("category")
+        and _has_budget_mention(text_lower)
+    ):
+        if not _detect_category(text) and not _has_buying_intent(text_lower):
+            return True
+
+    return False
+
+
 def extract_requirements(text: str) -> dict[str, Any]:
     """Extract structured requirements from user text."""
     text = _normalize_persian_digits(text)
     req: dict[str, Any] = {
-        "category": _detect_category(text),
+        "category": normalize_category(_detect_category(text)),
         "brand": None,
         "min_price": None,
         "max_price": None,
@@ -284,6 +428,7 @@ def extract_requirements(text: str) -> dict[str, Any]:
         (r"از\s*(\d[\d,\.]*)\s*(میلیون|میلیارد|تومان)?", "min"),
         (r"حداقل\s*(\d[\d,\.]*)\s*(میلیون|میلیارد|تومان)?", "min"),
         (r"بودجه\s*(\d[\d,\.]*)\s*(میلیون|میلیارد|تومان)?", "max"),
+        (r"بودجه\s*شد?\s*(\d[\d,\.]*)\s*(میلیون|میلیارد|تومان)?", "max"),
         (r"به\s*(\d[\d,\.]*)\s*(میلیون|میلیارد|تومان)?", "max"),
     ]
     for pattern, kind in price_patterns:
@@ -314,7 +459,7 @@ def _parse_price(num_str: str, unit: str | None) -> float:
 def get_missing_slots(requirements: dict[str, Any]) -> list[str]:
     """Determine which slots are missing for a good recommendation."""
     missing = []
-    if not requirements.get("category") and not requirements.get("raw_query"):
+    if not requirements.get("category"):
         missing.append("category")
     if requirements.get("max_price") is None and requirements.get("min_price") is None:
         missing.append("budget")

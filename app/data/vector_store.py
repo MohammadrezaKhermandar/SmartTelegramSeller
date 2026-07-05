@@ -12,6 +12,7 @@ import pandas as pd
 from app.config import CHROMA_DIR, EMBEDDING_MODEL, OPENAI_API_KEY, RAG_TOP_K, VECTOR_STORE_BACKEND
 from app.utils.errors import VectorStoreError
 from app.utils.logging import logger
+from app.utils.json_safe import to_json_safe
 from app.utils.retry import with_retry
 
 _TOKEN_RE = re.compile(r"[\w\u0600-\u06FF]+", re.UNICODE)
@@ -158,20 +159,22 @@ class ChromaVectorStore:
 
 def _row_to_search_result(row: pd.Series, score: float) -> dict[str, Any]:
     desc = str(row.get("description", ""))[:200]
-    return {
-        "product_id": str(row.get("product_id", "")),
-        "title": str(row.get("title", "")),
-        "price": float(row.get("price", 0) or 0),
-        "brand": str(row.get("brand", "")),
-        "category": str(row.get("category", "")),
-        "description": desc,
-        "image_url": str(row.get("image_url", "")) if pd.notna(row.get("image_url", None)) else "",
-        "score": round(score, 4),
-        "rating": float(row.get("rating", 0) or 0) if "rating" in row.index else None,
-        "discount": float(row.get("discount", 0) or 0) if "discount" in row.index else None,
-        "features": str(row.get("features", "")),
-        "stock": int(float(row.get("availability", row.get("stock", 0)) or 0)),
-    }
+    return to_json_safe(
+        {
+            "product_id": str(row.get("product_id", "")),
+            "title": str(row.get("title", "")),
+            "price": float(row.get("price", 0) or 0),
+            "brand": str(row.get("brand", "")),
+            "category": str(row.get("category", "")),
+            "description": desc,
+            "image_url": str(row.get("image_url", "")) if pd.notna(row.get("image_url", None)) else "",
+            "score": round(score, 4),
+            "rating": float(row.get("rating", 0) or 0) if "rating" in row.index else None,
+            "discount": float(row.get("discount", 0) or 0) if "discount" in row.index else None,
+            "features": str(row.get("features", "")),
+            "stock": int(float(row.get("availability", row.get("stock", 0)) or 0)),
+        }
+    )
 
 
 _vector_store: Any | None = None

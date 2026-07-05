@@ -7,6 +7,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from app.data.product_repository import ProductRepository
+from app.utils.json_safe import to_json_safe
 
 _repo: ProductRepository | None = None
 
@@ -49,11 +50,13 @@ def compare_products(product_ids: list[str]) -> dict[str, Any]:
         best = max(products, key=lambda x: x.get("rating", 0) or 0)
         highlights.append(f"بالاترین امتیاز: {best.get('title', '')}")
 
-    return {
-        "products": products,
-        "comparison": comparison,
-        "highlights": highlights,
-    }
+    return to_json_safe(
+        {
+            "products": products,
+            "comparison": comparison,
+            "highlights": highlights,
+        }
+    )
 
 
 @tool

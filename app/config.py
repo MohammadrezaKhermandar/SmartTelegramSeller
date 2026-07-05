@@ -34,6 +34,13 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 USE_LLM = os.getenv("USE_LLM", "true").lower() in ("1", "true", "yes")
 
+# xAI (Grok) – OpenAI-compatible API
+XAI_API_KEY = os.getenv("XAI_API_KEY", "")
+XAI_MODEL = os.getenv("XAI_MODEL", "grok-4.3")
+XAI_BASE_URL = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1")
+# Optional HTTP proxy for LLM calls (defaults to the Telegram proxy)
+LLM_PROXY = os.getenv("LLM_PROXY", os.getenv("TELEGRAM_PROXY", "")).strip()
+
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 

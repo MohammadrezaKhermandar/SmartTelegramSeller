@@ -7,7 +7,11 @@ from typing import Any
 from langchain_core.tools import tool
 
 from app.config import MIN_RECOMMENDATIONS
+from app.data.product_loader import product_to_dict
 from app.data.product_repository import ProductRepository
+from app.graph.nlp import normalize_category, product_matches_category
+from app.graph.prompts import SEARCH_LIMITED_MATCH_MESSAGES, SEARCH_NO_MATCH_MESSAGE
+from app.utils.json_safe import products_to_json_safe
 
 _repo: ProductRepository | None = None
 
@@ -26,6 +30,7 @@ def _get_repo() -> ProductRepository:
 @tool
 def filter_by_category_tool(category: str) -> list[dict[str, Any]]:
     """Filter products by category name."""
+    category = normalize_category(category) or category
     df = _get_repo().filter_by_category(category)
     return _get_repo().to_product_list(df, limit=20)
 
@@ -79,15 +84,17 @@ def hybrid_recommend(
     min_count: int = MIN_RECOMMENDATIONS,
 ) -> tuple[list[dict[str, Any]], str]:
     """
-    Merge Pandas hard filters with RAG semantic results.
-    Returns (products, note) where note explains relaxations.
+    Hard-filter via Pandas, then rank ONLY within that set using RAG scores.
+    Category is a mandatory constraint when provided — never widens to other categories.
     """
     from app.tools.rag_tools import semantic_search
 
     repo = _get_repo()
-    note = ""
+    category = normalize_category(category)
 
-    # Hard filters via Pandas
+    if not category:
+        return [], "لطفاً دسته محصول را مشخص کنید (مثلاً لپ‌تاپ، موبایل، هدفون)."
+
     filtered = repo.apply_filters(
         category=category,
         brand=brand,
@@ -96,69 +103,39 @@ def hybrid_recommend(
         in_stock_only=True,
     )
 
-    # RAG semantic matching
+    if filtered.empty:
+        return [], SEARCH_NO_MATCH_MESSAGE
+
+    candidates: dict[str, dict[str, Any]] = {}
+    for _, row in filtered.iterrows():
+        pid = str(row["product_id"])
+        base = product_to_dict(row)
+        base["product_id"] = pid
+        base["score"] = 0.1
+        base["pandas_match"] = True
+        candidates[pid] = base
+
     if rag_results is None:
         rag_results = semantic_search(query)
 
-    # Score and merge
-    scored: dict[str, dict[str, Any]] = {}
-    rag_ids = {r["product_id"] for r in rag_results}
-
-    for _, row in filtered.iterrows():
-        pid = str(row["product_id"])
-        base = {k: v for k, v in row.items() if not hasattr(v, "item")}
-        base["product_id"] = pid
-        base["pandas_match"] = True
-        base["score"] = 0.5
-        scored[pid] = base
-
-    for r in rag_results:
-        pid = r["product_id"]
-        if pid in scored:
-            scored[pid]["score"] = scored[pid].get("score", 0) + r.get("score", 0.5)
-            scored[pid]["rag_match"] = True
-        else:
-            product = repo.get_by_id(pid)
-            if product:
-                product["score"] = r.get("score", 0.3)
-                product["rag_match"] = True
-                scored[pid] = product
-
-    ranked = sorted(scored.values(), key=lambda x: x.get("score", 0), reverse=True)
-
-    # Relax constraints if fewer than min_count
-    if len(ranked) < min_count:
-        note = "تعداد محصولات دقیق کم بود؛ محدودیت‌ها را کمی شل کردم و گزینه‌های جایگزین پیشنهاد می‌دهم."
-        relaxed = repo.apply_filters(
-            category=category,
-            brand=None,
-            min_price=None if max_price else min_price,
-            max_price=max_price,
-            in_stock_only=True,
+    for hit in rag_results:
+        pid = str(hit.get("product_id", ""))
+        if pid not in candidates:
+            continue
+        candidates[pid]["score"] = candidates[pid].get("score", 0.1) + float(
+            hit.get("score", 0.5) or 0.5
         )
-        for _, row in relaxed.iterrows():
-            pid = str(row["product_id"])
-            if pid not in scored:
-                base = repo.get_by_id(pid) or {}
-                base["score"] = 0.2
-                base["relaxed"] = True
-                ranked.append(base)
-        ranked = sorted(ranked, key=lambda x: x.get("score", 0), reverse=True)[: max(min_count, 10)]
+        candidates[pid]["rag_match"] = True
 
-    else:
-        ranked = ranked[: max(min_count, 10)]
+    ranked = sorted(candidates.values(), key=lambda x: x.get("score", 0), reverse=True)
+    ranked = [p for p in ranked if product_matches_category(p, category)]
 
-    if len(ranked) < min_count and rag_results:
-        for r in rag_results:
-            if len(ranked) >= min_count:
-                break
-            pid = r["product_id"]
-            if not any(p.get("product_id") == pid for p in ranked):
-                product = repo.get_by_id(pid)
-                if product:
-                    product["score"] = r.get("score", 0.1)
-                    product["alternative"] = True
-                    ranked.append(product)
-        note = note or "محصول دقیق پیدا نشد؛ محصولات مشابه پیشنهاد می‌شوند."
+    if not ranked:
+        return [], SEARCH_NO_MATCH_MESSAGE
 
-    return ranked[:max(min_count, len(ranked))], note
+    # 1–2 results: honest "only N options" note; 3+: normal intro (empty note).
+    # The no-match message is reserved for the zero-result case above.
+    note = SEARCH_LIMITED_MATCH_MESSAGES.get(len(ranked), "")
+
+    limit = max(min_count, min(len(ranked), 10))
+    return products_to_json_safe(ranked[:limit]), note

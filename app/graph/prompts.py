@@ -141,15 +141,31 @@ DISCOUNT_2D_MESSAGE = (
     "{products_summary}"
 )
 
+SEARCH_NO_MATCH_MESSAGE = (
+    "در این دسته‌بندی محصولی با این شرایط پیدا نکردم.\n"
+    "اگر مایل باشید می‌توانیم بودجه را افزایش دهیم، برند دیگری بررسی کنیم یا دسته دیگری انتخاب کنیم."
+)
+
+# Shown when results exist but are fewer than MIN_RECOMMENDATIONS — must NOT
+# contain the no-match wording, since products are displayed right below it.
+SEARCH_LIMITED_MATCH_MESSAGES = {
+    1: "فقط یک گزینه نزدیک به شرایطت پیدا کردم.",
+    2: "فقط دو گزینه نزدیک به شرایطت پیدا کردم.",
+}
+
 
 def format_product_recommendation(products: list[dict], note: str = "") -> str:
     """Format product recommendations in Persian."""
     if not products:
-        return "متأسفانه محصول مناسبی پیدا نکردم. لطفاً نیازت رو دقیق‌تر بگو."
+        return note or SEARCH_NO_MATCH_MESSAGE
 
-    lines = ["بر اساس نیازت، این گزینه‌ها رو پیشنهاد می‌دم:\n"]
-    if note:
-        lines.append(f"ℹ️ {note}\n")
+    if note in SEARCH_LIMITED_MATCH_MESSAGES.values():
+        # Limited-match note replaces the plural intro entirely
+        lines = [f"{note}\n"]
+    else:
+        lines = ["بر اساس نیازت، این گزینه‌ها رو پیشنهاد می‌دم:\n"]
+        if note:
+            lines.append(f"ℹ️ {note}\n")
 
     for i, p in enumerate(products[:5], 1):
         title = p.get("title", "بدون عنوان")

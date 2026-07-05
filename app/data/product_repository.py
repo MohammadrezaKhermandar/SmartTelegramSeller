@@ -26,37 +26,50 @@ class ProductRepository:
             return None
         return product_to_dict(matches.iloc[0])
 
-    def filter_by_category(self, category: str) -> pd.DataFrame:
-        if "category" not in self.df.columns:
-            return self.df.iloc[0:0]
-        mask = self.df["category"].astype(str).str.contains(category, case=False, na=False)
-        return self.df[mask]
+    def filter_by_category(self, category: str, df: pd.DataFrame | None = None) -> pd.DataFrame:
+        source = df if df is not None else self.df
+        if "category" not in source.columns:
+            return source.iloc[0:0]
+        mask = source["category"].astype(str).str.contains(
+            category, case=False, na=False, regex=False
+        )
+        return source[mask]
 
-    def filter_by_brand(self, brand: str) -> pd.DataFrame:
-        if "brand" not in self.df.columns:
-            return self.df.iloc[0:0]
-        mask = self.df["brand"].astype(str).str.contains(brand, case=False, na=False)
-        return self.df[mask]
+    def filter_by_brand(self, brand: str, df: pd.DataFrame | None = None) -> pd.DataFrame:
+        source = df if df is not None else self.df
+        if "brand" not in source.columns:
+            return source.iloc[0:0]
+        mask = source["brand"].astype(str).str.contains(
+            brand, case=False, na=False, regex=False
+        )
+        return source[mask]
 
     def filter_by_price_range(
-        self, min_price: float | None = None, max_price: float | None = None
+        self,
+        min_price: float | None = None,
+        max_price: float | None = None,
+        df: pd.DataFrame | None = None,
     ) -> pd.DataFrame:
-        if "price" not in self.df.columns:
-            return self.df
-        result = self.df.copy()
+        source = df if df is not None else self.df
+        if "price" not in source.columns:
+            return source
+        result = source
         if min_price is not None:
             result = result[result["price"] >= min_price]
         if max_price is not None:
             result = result[result["price"] <= max_price]
         return result
 
-    def filter_by_availability(self, in_stock_only: bool = True) -> pd.DataFrame:
-        col = "availability" if "availability" in self.df.columns else "stock"
-        if col not in self.df.columns:
-            return self.df
+    def filter_by_availability(
+        self, in_stock_only: bool = True, df: pd.DataFrame | None = None
+    ) -> pd.DataFrame:
+        source = df if df is not None else self.df
+        col = "availability" if "availability" in source.columns else "stock"
+        if col not in source.columns:
+            return source
         if in_stock_only:
-            return self.df[self.df[col].astype(float) > 0]
-        return self.df
+            return source[source[col].astype(float) > 0]
+        return source
 
     def sort_by(
         self, df: pd.DataFrame, field: str = "price", ascending: bool = True
@@ -76,13 +89,13 @@ class ProductRepository:
         """Apply multiple hard filters sequentially."""
         result = self.df
         if category:
-            result = self.filter_by_category(category)
+            result = self.filter_by_category(category, df=result)
         if brand:
-            result = self.filter_by_brand(brand)
+            result = self.filter_by_brand(brand, df=result)
         if min_price is not None or max_price is not None:
-            result = self.filter_by_price_range(min_price, max_price)
+            result = self.filter_by_price_range(min_price, max_price, df=result)
         if in_stock_only:
-            result = self.filter_by_availability(True)
+            result = self.filter_by_availability(True, df=result)
         return result
 
     def to_product_list(self, df: pd.DataFrame, limit: int = 10) -> list[dict[str, Any]]:

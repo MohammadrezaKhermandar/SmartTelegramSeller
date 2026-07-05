@@ -11,6 +11,7 @@ import requests
 
 from app.config import CSV_DOWNLOAD_URL, CSV_PATH, PROJECT_ROOT
 from app.utils.errors import ProductLoadError
+from app.utils.json_safe import to_json_safe
 from app.utils.logging import logger
 from app.utils.retry import with_retry
 
@@ -306,4 +307,4 @@ def product_to_dict(row: pd.Series) -> dict[str, Any]:
             result[col] = parse_availability(val)
         else:
             result[col] = val
-    return result
+    return to_json_safe(result)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from telegram import BotCommand
+from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_PROXY

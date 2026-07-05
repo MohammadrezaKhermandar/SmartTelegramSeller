@@ -78,11 +78,108 @@ def test_changed_budget_refreshes_recommendations():
 
     result = graph.invoke(
         {
-            "messages": [HumanMessage(content="بودجه‌ام رو به ۳۰ میلیون تغییر دادم")],
+            "messages": [HumanMessage(content="بودجه‌ام رو به ۵۰ میلیون تغییر دادم")],
             "user_id": user_id,
         },
         config,
     )
     assert result.get("recommended_products")
     req = result.get("requirements", {})
-    assert req.get("max_price") is not None
+    assert req.get("max_price") == 50_000_000
+    assert req.get("category") == "لپ‌تاپ"
+
+
+def test_budget_shod_preserves_category():
+    user_id = "budget_shod_user"
+    config = {"configurable": {"thread_id": user_id}}
+    graph = build_graph()
+
+    graph.invoke(
+        {
+            "user_id": user_id,
+            "messages": [HumanMessage(content="لپ‌تاپ برای اداری با بودجه ۱۰۰ میلیون")],
+            "retry_count": 0,
+            "errors": [],
+        },
+        config,
+    )
+
+    result = graph.invoke(
+        {
+            "messages": [HumanMessage(content="بودجه شد ۳۰ میلیون")],
+            "user_id": user_id,
+        },
+        config,
+    )
+    req = result.get("requirements", {})
+    assert req.get("category") == "لپ‌تاپ"
+    assert req.get("max_price") == 30_000_000
+
+
+def test_budget_update_keeps_same_category_recommendations():
+    user_id = "budget_category_user"
+    config = {"configurable": {"thread_id": user_id}}
+    graph = build_graph()
+
+    graph.invoke(
+        {
+            "user_id": user_id,
+            "messages": [HumanMessage(content="لپ‌تاپ برای اداری با بودجه ۱۰۰ میلیون")],
+            "retry_count": 0,
+            "errors": [],
+        },
+        config,
+    )
+
+    result = graph.invoke(
+        {
+            "messages": [HumanMessage(content="بودجه شد ۵۰ میلیون")],
+            "user_id": user_id,
+        },
+        config,
+    )
+    products = result.get("recommended_products") or []
+    assert products, "Expected refreshed recommendations after budget change"
+    for product in products[:5]:
+        category = str(product.get("category", ""))
+        assert "لپ" in category or "لپ‌تاپ" in category
+
+
+def test_laptop_gathering_conversation_all_recommendations_are_laptops():
+    """یه لپ‌تاپ می‌خوام → بودجه ۱۰۰ میلیون برای برنامه‌نویسی must stay in laptop category."""
+    user_id = "laptop_gathering_user"
+    config = {"configurable": {"thread_id": user_id}}
+    graph = build_graph()
+
+    turn1 = graph.invoke(
+        {
+            "user_id": user_id,
+            "messages": [HumanMessage(content="یه لپ‌تاپ می‌خوام")],
+            "retry_count": 0,
+            "errors": [],
+        },
+        config,
+    )
+    assert turn1.get("requirements", {}).get("category") == "لپ‌تاپ"
+    assert turn1.get("conversation_stage") == "gathering_requirements"
+
+    turn2 = graph.invoke(
+        {
+            "messages": [HumanMessage(content="بودجه ۱۰۰ میلیون برای برنامه‌نویسی")],
+            "user_id": user_id,
+        },
+        config,
+    )
+    assert turn2.get("current_intent") == "new_product_request"
+    req = turn2.get("requirements", {})
+    assert req.get("category") == "لپ‌تاپ"
+    assert req.get("usage") == "برنامه‌نویسی"
+    assert req.get("max_price") == 100_000_000
+
+    products = turn2.get("recommended_products") or []
+    assert products, "Expected laptop recommendations after completing requirements"
+    for product in products:
+        category = str(product.get("category", ""))
+        assert category == "لپ‌تاپ" or "لپ" in category, (
+            f"Expected laptop, got category={category!r} title={product.get('title')!r}"
+        )

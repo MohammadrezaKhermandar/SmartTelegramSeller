@@ -70,7 +70,7 @@ def route_after_update(
     """After preference change, check info or search directly."""
     missing = state.get("missing_slots") or []
     req = state.get("requirements") or {}
-    has_category = bool(req.get("category") or req.get("raw_query"))
+    has_category = bool(req.get("category"))
     if missing and not has_category:
         return "enough_info_checker"
     return "tool_agent"

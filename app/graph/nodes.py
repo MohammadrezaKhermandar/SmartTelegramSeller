@@ -28,7 +28,16 @@ from app.tools.pandas_tools import get_product_by_id_tool, hybrid_recommend
 from app.tools.rag_tools import semantic_search
 from app.tools.url_tools import process_url_input
 from app.llm.client import polish_response
+from app.utils.json_safe import products_to_json_safe, to_json_safe
 from app.utils.logging import logger
+
+
+def _safe_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return products_to_json_safe(products)
+
+
+def _safe_requirements(req: dict[str, Any]) -> dict[str, Any]:
+    return to_json_safe(nlp.normalize_requirements(req))
 
 
 def load_memory_node(state: SalesAssistantState) -> dict[str, Any]:
@@ -50,10 +59,17 @@ def input_classifier_node(state: SalesAssistantState) -> dict[str, Any]:
 def intent_detector_node(state: SalesAssistantState) -> dict[str, Any]:
     """Detect user intent from message."""
     text = _last_human_text(state)
+    existing_req = state.get("requirements") or {}
     has_recs = bool(state.get("recommended_products"))
     has_image = bool(state.get("image_input"))
 
-    intent = nlp.detect_intent(text, has_image=has_image, has_recommendations=has_recs)
+    intent = nlp.detect_intent(
+        text,
+        has_image=has_image,
+        has_recommendations=has_recs,
+        existing_requirements=existing_req,
+        conversation_stage=state.get("conversation_stage"),
+    )
 
     # Continue requirement gathering when user answers clarifying questions
     if intent == "unknown" and state.get("conversation_stage") == "gathering_requirements":
@@ -68,21 +84,16 @@ def intent_detector_node(state: SalesAssistantState) -> dict[str, Any]:
 def requirement_extractor_node(state: SalesAssistantState) -> dict[str, Any]:
     """Extract product requirements from user message."""
     text = _last_human_text(state)
-    req = nlp.extract_requirements(text)
-    missing = nlp.get_missing_slots(req)
-
-    # Merge with existing requirements
-    existing = dict(state.get("requirements") or {})
-    for k, v in req.items():
-        if v is not None and v != [] and v != "":
-            existing[k] = v
+    new_req = nlp.extract_requirements(text)
+    merged = nlp.merge_requirements(state.get("requirements"), new_req)
+    missing = nlp.get_missing_slots(merged)
 
     return {
-        "requirements": existing,
+        "requirements": _safe_requirements(merged),
         "missing_slots": missing,
-        "product_category": existing.get("category"),
+        "product_category": merged.get("category"),
         "conversation_stage": "gathering_requirements",
-        "last_search_query": text,
+        "last_search_query": merged.get("raw_query") or text,
     }
 
 
@@ -90,18 +101,13 @@ def update_requirements_node(state: SalesAssistantState) -> dict[str, Any]:
     """Update requirements when user changes preferences."""
     text = _last_human_text(state)
     new_req = nlp.extract_requirements(text)
-    existing = dict(state.get("requirements") or {})
-
-    for k, v in new_req.items():
-        if v is not None and v != [] and v != "":
-            existing[k] = v
-
-    missing = nlp.get_missing_slots(existing)
-    logger.info("Updated requirements: %s", existing)
+    merged = nlp.merge_requirements(state.get("requirements"), new_req)
+    missing = nlp.get_missing_slots(merged)
+    logger.info("Updated requirements: %s", merged)
     return {
-        "requirements": existing,
+        "requirements": _safe_requirements(merged),
         "missing_slots": missing,
-        "product_category": existing.get("category"),
+        "product_category": merged.get("category"),
         "recommended_products": [],  # clear for refresh
         "conversation_stage": "gathering_requirements",
     }
@@ -110,10 +116,9 @@ def update_requirements_node(state: SalesAssistantState) -> dict[str, Any]:
 def enough_info_checker_node(state: SalesAssistantState) -> dict[str, Any]:
     """Check if we have enough info to search."""
     missing = state.get("missing_slots") or []
-    req = state.get("requirements") or {}
+    req = nlp.normalize_requirements(state.get("requirements") or {})
 
-    # Enough if category + (budget or usage)
-    has_category = bool(req.get("category") or req.get("raw_query"))
+    has_category = bool(req.get("category"))
     has_budget = req.get("max_price") is not None or req.get("min_price") is not None
     has_usage = bool(req.get("usage"))
 
@@ -153,23 +158,34 @@ def ask_clarifying_question_node(state: SalesAssistantState) -> dict[str, Any]:
 
 def hybrid_search_node(state: SalesAssistantState) -> dict[str, Any]:
     """Hybrid RAG + Pandas search (fallback when tool agent unavailable)."""
-    req = state.get("requirements") or {}
-    query = req.get("raw_query") or state.get("last_search_query") or ""
+    req = nlp.normalize_requirements(state.get("requirements") or {})
+    category = req.get("category")
+    query_parts = [req.get("raw_query") or state.get("last_search_query") or ""]
+    if category:
+        query_parts.insert(0, str(category))
     if req.get("usage"):
-        query = f"{query} {req['usage']}"
+        query_parts.append(str(req["usage"]))
+    query = " ".join(part for part in query_parts if part).strip()
 
     try:
+        if not category:
+            return {
+                "last_search_result": [],
+                "search_note": "لطفاً دسته محصول را مشخص کنید (مثلاً لپ‌تاپ، موبایل، هدفون).",
+                "retry_count": 0,
+            }
+
         rag_results = semantic_search(query)
         products, note = hybrid_recommend(
             query=query,
-            category=req.get("category"),
+            category=category,
             brand=req.get("brand"),
             min_price=req.get("min_price"),
             max_price=req.get("max_price"),
             rag_results=rag_results,
         )
         return {
-            "last_search_result": products,
+            "last_search_result": _safe_products(products),
             "search_note": note,
             "retry_count": 0,
         }
@@ -193,7 +209,7 @@ def tool_agent_node(state: SalesAssistantState) -> dict[str, Any]:
         if agent_result:
             products, note = agent_result
             return {
-                "last_search_result": products,
+                "last_search_result": _safe_products(products),
                 "search_note": note,
                 "retry_count": 0,
                 "from_tool_agent": True,
@@ -213,7 +229,7 @@ def tool_agent_node(state: SalesAssistantState) -> dict[str, Any]:
 
 def recommend_products_node(state: SalesAssistantState) -> dict[str, Any]:
     """Format and store product recommendations."""
-    products = state.get("last_search_result") or []
+    products = _safe_products(state.get("last_search_result") or [])
     note = state.get("search_note") or ""
     response = format_product_recommendation(products, note)
 
@@ -307,7 +323,7 @@ def compare_products_node(state: SalesAssistantState) -> dict[str, Any]:
     result = compare_products(product_ids)
     response = format_compare_result(result)
     return {
-        "compare_result": result,
+        "compare_result": to_json_safe(result),
         "response_text": response,
         "conversation_stage": "comparing",
         "messages": [AIMessage(content=response)],
@@ -324,6 +340,7 @@ def image_similarity_node(state: SalesAssistantState) -> dict[str, Any]:
     query, similar = process_image_input(caption, file_name)
 
     if similar:
+        similar = _safe_products(similar)
         response = build_image_acknowledgment(query, False)
         response += "\n\n" + format_product_recommendation(similar[:3], "محصولات مشابه عکس شما:")
         return {
@@ -357,6 +374,7 @@ def url_similarity_node(state: SalesAssistantState) -> dict[str, Any]:
         }
 
     response = f"لینک رو بررسی کردم و محصولات مشابه پیدا کردم:\n\n"
+    similar = _safe_products(similar)
     response += format_product_recommendation(similar[:3], f"بر اساس: {query[:80]}")
     return {
         "last_search_result": similar,

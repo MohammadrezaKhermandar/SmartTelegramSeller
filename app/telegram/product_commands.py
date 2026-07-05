@@ -11,16 +11,18 @@ from app.telegram.jobs import schedule_followups
 from app.telegram.media import reply_with_recommendations
 from app.tools.pandas_tools import _get_repo, filter_by_category_tool, get_product_by_id_tool
 from app.tools.rag_tools import semantic_search
+from app.utils.json_safe import products_to_json_safe
 from app.utils.logging import logger
 
 MAX_LIST = 5
 
 
 def _save_recommendations(user_id: str, products: list[dict]) -> None:
+    safe_products = products_to_json_safe(products)
     session_store.update_from_state(
         user_id,
         {
-            "recommended_products": products,
+            "recommended_products": safe_products,
             "conversation_stage": "recommending",
             "purchase_status": "pending",
         },
