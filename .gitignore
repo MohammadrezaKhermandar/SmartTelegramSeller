@@ -1,0 +1,19 @@
+.env
+.env.local
+.data/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Chroma / SQLite runtime artifacts (outside .data/)
+chroma/
+*.chroma
+*.sqlite
+*.sqlite3
+
+# Demo / temp outputs
+demo_memory.sqlite
+*.log

@@ -1,0 +1,28 @@
+# Core graph / LLM orchestration
+langgraph>=0.2.60
+langchain>=0.3.14
+langchain-core>=0.3.29
+langchain-openai>=0.2.14
+langchain-community>=0.3.14
+
+# Vector database
+chromadb>=0.5.20
+
+# Data
+pandas>=2.2.0
+
+# Telegram
+python-telegram-bot[socks]>=21.9
+
+# HTTP / parsing (link similarity)
+httpx>=0.27.0
+beautifulsoup4>=4.12.3
+
+# Config
+python-dotenv>=1.0.1
+
+# Optional: nicer graph rendering fallback
+matplotlib>=3.8.0
+
+# Tests
+pytest>=8.0.0
