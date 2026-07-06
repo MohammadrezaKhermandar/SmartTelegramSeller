@@ -130,7 +130,11 @@ class RecommendationService:
         budget = requirements.get("budget")
         category = requirements.get("category")
         brands = requirements.get("brands") or []
-        strict = strict_budget or bool(requirements.get("hard_max_price"))
+        strict = (
+            strict_budget
+            or bool(requirements.get("hard_max_price"))
+            or requirements.get("allow_budget_overflow") is False
+        )
 
         f = ProductFilter(
             max_price=budget,
@@ -199,7 +203,7 @@ class RecommendationService:
         else:
             top = scored[:slice_size]
 
-        if not strict and len(top) < 3:
+        if not strict and len(top) < 3 and requirements.get("allow_budget_overflow", True):
             top = self._pad_with_alternatives(top, query_text, requirements, category)
 
         if strict and budget:

@@ -71,6 +71,14 @@ def _decide(state: SalesState) -> Route:
     if intent == "request_product_images" and recs:
         return "answer_from_memory"
 
+    if intent == "change_preferences":
+        missing_hard = [
+            s for s in HARD_SLOTS if s not in state.get("requirements", {})
+        ]
+        if missing_hard:
+            return "needs_clarification"
+        return "product_search"
+
     if state.get("should_search_products"):
         missing_hard = [
             s for s in HARD_SLOTS if s not in state.get("requirements", {})

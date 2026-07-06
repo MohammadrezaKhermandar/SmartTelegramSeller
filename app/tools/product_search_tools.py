@@ -22,6 +22,7 @@ def recommend_products_tool(
     top_k: int = 3,
     strict_budget: bool = False,
     hard_max_price: bool = False,
+    allow_budget_overflow: Optional[bool] = None,
 ) -> dict[str, Any]:
     """پیشنهاد ترکیبی محصولات (Pandas + RAG) بر اساس نیاز کاربر.
 
@@ -35,6 +36,8 @@ def recommend_products_tool(
         "use_case": use_case,
         "hard_max_price": hard_max_price,
     }
+    if allow_budget_overflow is not None:
+        requirements["allow_budget_overflow"] = allow_budget_overflow
     return get_recommendation_service().recommend(
         query_text, requirements, top_k=top_k, strict_budget=strict_budget
     )
