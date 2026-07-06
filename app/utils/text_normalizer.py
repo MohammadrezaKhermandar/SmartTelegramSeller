@@ -156,6 +156,43 @@ def is_hard_max_budget(text: str) -> bool:
     return False
 
 
+def is_reject_budget_overflow(text: str) -> bool:
+    """True when user refuses recommendations above the stated budget.
+
+    Routes to ``change_preferences`` (sets allow_budget_overflow=false).
+    Must be checked before memory/attribute heuristics that match «قیمت».
+    """
+    norm = normalize(text).lower()
+    if not norm:
+        return False
+    compact = norm.replace(" ", "").replace("\u200c", "")
+
+    if "فقط داخل همین بودجه" in norm or "فقطداخلهمینبودجه" in compact:
+        return True
+    if "سقف بودجه همین" in norm or "سقفبودجههمین" in compact:
+        return True
+    if "بودجه ام همین" in norm or "بودجه‌ام همین" in norm or "بودجهامهمین" in compact:
+        return True
+    if "نمیخوام بیشتر هزینه" in compact or (
+        "نمی" in compact and "بیشتر" in norm and "هزینه" in norm
+    ):
+        return True
+    if "بیشتر از این" in norm and "هزینه" in norm and "نمی" in compact:
+        return True
+    if "گرون تر نمی" in norm or "گرون‌تر نمی" in norm or "گرونترنمی" in compact:
+        return True
+    if "قیمت" in norm and "بالا" in norm and "نمی" in compact:
+        return True
+    if "بالاتر" in norm and "نمی" in compact and not extract_budget(text):
+        return True
+    return False
+
+
+def is_change_preferences(text: str) -> bool:
+    """Preference update that should re-run recommendations (not memory Q&A)."""
+    return is_reject_budget_overflow(text)
+
+
 def extract_ordinal(text: str) -> Optional[int]:
     """Detect references like 'گزینه دوم' / 'دومی' / 'مورد 3'."""
     norm = normalize(text)
@@ -304,6 +341,8 @@ def match_product_name_query(
 def is_memory_reference(text: str, products: list[dict[str, Any]]) -> bool:
     """True when the message refers to a prior recommendation (ordinal/name/attribute)."""
     if not products:
+        return False
+    if is_change_preferences(text):
         return False
     if extract_ordinal(text) is not None:
         return True

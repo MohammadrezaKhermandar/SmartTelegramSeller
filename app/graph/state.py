@@ -39,6 +39,7 @@ class SalesState(TypedDict, total=False):
     should_use_memory: bool
     requirements_changed: bool  # user changed budget/brand/... -> partial re-run
     explicit_requirement_update: bool  # this message carries new/changed slots
+    preference_update: bool  # change_preferences (e.g. reject over-budget alternatives)
 
     # --- error handling ---
     error: Optional[str]
@@ -88,6 +89,7 @@ def initial_state(
         should_use_memory=False,
         requirements_changed=False,
         explicit_requirement_update=False,
+        preference_update=False,
         error=None,
         retry_count=0,
         final_response="",

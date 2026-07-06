@@ -34,7 +34,9 @@ from app.utils.text_normalizer import (
     format_price,
     is_attribute_question,
     is_hard_max_budget,
+    is_change_preferences,
     is_memory_reference,
+    is_reject_budget_overflow,
     is_product_image_request,
     is_purchase_request,
     match_product_name_query,
@@ -85,7 +87,24 @@ def _persist(chat_id: str, **fields: Any) -> None:
 def _strict_budget_active(state: SalesState, requirements: Optional[dict[str, Any]] = None) -> bool:
     """True when max_price must be enforced as a hard ceiling."""
     requirements = requirements if requirements is not None else state.get("requirements", {})
-    return bool(requirements.get("hard_max_price"))
+    if requirements.get("hard_max_price"):
+        return True
+    if requirements.get("allow_budget_overflow") is False:
+        return True
+    return False
+
+
+def _apply_preference_updates(
+    requirements: dict[str, Any],
+    message: str,
+    old_requirements: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply change_preferences slots (e.g. reject over-budget alternatives)."""
+    if not is_change_preferences(message):
+        return requirements
+    requirements["allow_budget_overflow"] = False
+    requirements["hard_max_price"] = True
+    return requirements
 
 
 def _strip_lines_with_product_names(text: str, names: list[str]) -> str:
@@ -200,6 +219,8 @@ def _rule_based_intent(state: SalesState) -> str:
         return "request_product_images"
     if recs and any(w in text for w in _COMPARE_WORDS):
         return "compare_products"
+    if recs and is_change_preferences(state.get("current_message", "")):
+        return "change_preferences"
     if recs and extract_budget(state.get("current_message", "")) is not None:
         return "product_request"
     if recs and is_memory_reference(state.get("current_message", ""), recs):
@@ -226,6 +247,10 @@ def _extract_slots_rule_based(state: SalesState) -> dict[str, Any]:
         updates["budget"] = budget
         if is_hard_max_budget(text):
             updates["hard_max_price"] = True
+
+    if is_reject_budget_overflow(text):
+        updates["allow_budget_overflow"] = False
+        updates["hard_max_price"] = True
 
     service = get_pandas_service()
     category = detect_category(text, service.list_categories())
@@ -303,6 +328,8 @@ def extract_user_intent_and_requirements(state: SalesState) -> dict[str, Any]:
                         pass
                     elif llm_intent == "purchase_done":
                         intent = "purchase_requested"
+                    elif intent == "change_preferences":
+                        pass
                     elif stage == "clarifying" and intent == "product_request":
                         pass
                     elif intent in ("chitchat", "greeting", "product_request"):
@@ -320,13 +347,20 @@ def extract_user_intent_and_requirements(state: SalesState) -> dict[str, Any]:
                         slot_updates[key] = llm_out[key]
 
         no_pref = slot_updates.pop("brands_no_preference", False)
+        message = state.get("current_message", "")
+        if is_change_preferences(message):
+            intent = "change_preferences"
+
         explicit_requirement_update = any(k in slot_updates for k in _REQUIREMENT_UPDATE_KEYS)
-        if explicit_requirement_update:
+        preference_update = is_change_preferences(message) or (
+            "allow_budget_overflow" in slot_updates or "hard_max_price" in slot_updates
+        )
+        if explicit_requirement_update and intent != "change_preferences":
             intent = "product_request"
 
         requirements.update({k: v for k, v in slot_updates.items() if v not in (None, "")})
+        requirements = _apply_preference_updates(requirements, message, old_requirements)
         if "budget" in slot_updates:
-            message = state.get("current_message", "")
             if is_hard_max_budget(message):
                 requirements["hard_max_price"] = True
             elif (
@@ -339,7 +373,11 @@ def extract_user_intent_and_requirements(state: SalesState) -> dict[str, Any]:
             requirements["brands_asked"] = True
 
         requirements_changed = any(
-            old_requirements.get(k) != requirements.get(k) for k in ("budget", "category", "brands", "use_case")
+            old_requirements.get(k) != requirements.get(k)
+            for k in (
+                "budget", "category", "brands", "use_case",
+                "allow_budget_overflow", "hard_max_price",
+            )
         )
 
         missing = [
@@ -348,15 +386,17 @@ def extract_user_intent_and_requirements(state: SalesState) -> dict[str, Any]:
         ]
 
         logger.info(
-            "Intent=%s changed=%s explicit=%s updates=%s missing=%s",
-            intent, requirements_changed, explicit_requirement_update, slot_updates, missing,
+            "Intent=%s changed=%s explicit=%s pref=%s updates=%s missing=%s",
+            intent, requirements_changed, explicit_requirement_update, preference_update,
+            slot_updates, missing,
         )
         return {
             "intent": intent,
             "requirements": requirements,
             "missing_slots": missing,
             "requirements_changed": requirements_changed,
-            "explicit_requirement_update": explicit_requirement_update,
+            "explicit_requirement_update": explicit_requirement_update or preference_update,
+            "preference_update": preference_update,
         }
     except Exception as exc:
         logger.exception("extract_user_intent_and_requirements failed")
@@ -379,6 +419,22 @@ def check_memory_relevance(state: SalesState) -> dict[str, Any]:
     stage = state.get("conversation_stage", "")
     explicit_update = state.get("explicit_requirement_update", False)
     req_changed = state.get("requirements_changed", False)
+    preference_update = state.get("preference_update", False) or intent == "change_preferences"
+
+    if preference_update or is_change_preferences(message):
+        budget = requirements.get("budget")
+        updates: dict[str, Any] = {
+            "should_use_memory": False,
+            "should_search_products": bool(budget and requirements.get("category")),
+            "intent": "product_request",
+            "preference_update": True,
+        }
+        if budget:
+            memory = get_memory_service()
+            memory.deactivate_over_budget_recommendations(state["chat_id"], budget)
+            recs = filter_products_by_max_price(recs, budget)
+            updates["last_recommended_products"] = recs
+        return updates
 
     if explicit_update or req_changed:
         updates: dict[str, Any] = {
@@ -387,7 +443,7 @@ def check_memory_relevance(state: SalesState) -> dict[str, Any]:
             "intent": "product_request",
         }
         budget = requirements.get("budget")
-        if explicit_update and budget and requirements.get("hard_max_price"):
+        if explicit_update and budget and _strict_budget_active(state, requirements):
             memory = get_memory_service()
             memory.deactivate_over_budget_recommendations(state["chat_id"], budget)
             recs = filter_products_by_max_price(recs, budget)
@@ -692,6 +748,7 @@ def hybrid_product_search(state: SalesState) -> dict[str, Any]:
                 "top_k": 3,
                 "strict_budget": strict_budget,
                 "hard_max_price": bool(requirements.get("hard_max_price")),
+                "allow_budget_overflow": requirements.get("allow_budget_overflow"),
             }
         )
         products = _apply_hard_budget_guard(
